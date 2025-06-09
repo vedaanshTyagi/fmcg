@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
 import os
-import pyrebase
 from datetime import datetime
-import firebase_admin
-from firebase_admin import credentials, firestore
+import pyrebase  # This now uses pyrebase4
+
 # Firebase Configuration
 firebaseConfig = {
     "apiKey": "AIzaSyBAgKUj_k6LWknvQNcOd8MCuyZ2Fr-CZ4g",
