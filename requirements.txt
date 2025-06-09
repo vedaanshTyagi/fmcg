@@ -6,4 +6,3 @@ python-jwt>=3.3.0
 requests-toolbelt>=0.9.1
 oauth2client>=4.1.0
 requests>=2.21.0
-firebase-admin>=6.0.0
