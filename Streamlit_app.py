@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-import pyrebase
+import pyrebase4
 from datetime import datetime
 
 # Firebase Configuration
