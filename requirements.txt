@@ -1,7 +1,6 @@
 streamlit
 pandas
 numpy
-pyrebase==0.0 
 pyrebase4>=4.5.0
 python-jwt>=3.3.0
 requests-toolbelt>=0.9.1
