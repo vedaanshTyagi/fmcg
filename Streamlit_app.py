@@ -3,7 +3,8 @@ import pandas as pd
 import os
 import pyrebase4
 from datetime import datetime
-
+import firebase_admin
+from firebase_admin import credentials, firestore
 # Firebase Configuration
 firebaseConfig = {
     "apiKey": "AIzaSyBAgKUj_k6LWknvQNcOd8MCuyZ2Fr-CZ4g",
