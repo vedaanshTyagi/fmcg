@@ -1,4 +1,5 @@
-pip install pyrebase
-pip install streamlit
-pip install pandas
-pip install os
+pyrebase4
+streamlit
+pandas
+os
+
