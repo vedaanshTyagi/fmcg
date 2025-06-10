@@ -8,3 +8,4 @@ oauth2client>=4.1.0
 requests>=2.21.0
 setuptools>=69.0.0  # Required for pkg_resources
 plotly.express
+BytesIO
