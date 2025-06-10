@@ -9,5 +9,5 @@ requests>=2.21.0
 setuptools>=69.0.0  # Required for pkg_resources
 plotly.express
 datetime
-oauth2client
-gspread
+gspread==6.0.0
+oauth2client==4.1.3
