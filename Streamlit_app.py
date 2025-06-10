@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import os
-from datetime import datetime
-import pyrebase  # This now uses pyrebase4
+import datetime
+import pyrebase
 from io import BytesIO
 import plotly.express as px
 
@@ -190,6 +189,15 @@ st.markdown("""
         font-weight: 500;
         color: #1e3a8a !important;
     }
+    
+    /* App specific styles */
+    .app-header {font-size:24px !important; font-weight:bold; color:#1e3a8a;}
+    .subheader {font-size:18px !important; font-weight:600; color:#3b82f6; border-bottom:1px solid #eee; padding-bottom:5px;}
+    .metric {background-color:#f0f9ff; padding:15px; border-radius:10px; text-align:center; box-shadow:0 2px 5px rgba(0,0,0,0.05);}
+    .metric-value {font-size:24px; font-weight:bold; color:#1e3a8a;}
+    .metric-label {font-size:14px; color:#6b7280;}
+    .stDataFrame {border-radius:10px !important;}
+    .stTextInput>div>div>input, .stSelectbox>div>div>select {border-radius:8px !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -201,6 +209,16 @@ if 'page' not in st.session_state:
     st.session_state.auth_message = {'type': None, 'text': None}
     st.session_state.show_password_reset = False
     st.session_state.show_signup = False
+    st.session_state.customers = pd.DataFrame(columns=[
+        'Name', 'Contact', 'Email', 'Address', 'Company', 'Category'
+    ])
+    st.session_state.leads = pd.DataFrame(columns=[
+        'Customer', 'Status', 'Value', 'Salesperson', 'Notes', 'FollowUp'
+    ])
+    st.session_state.interactions = pd.DataFrame(columns=[
+        'Customer', 'Type', 'Date', 'Notes'
+    ])
+    st.session_state.edit_customer = None
 
 
 # =====================
@@ -571,47 +589,16 @@ def password_reset():
 # =====================
 # APP PAGE
 # =====================
-# Initialize session state
-if 'customers' not in st.session_state:
-    st.session_state.customers = pd.DataFrame(columns=[
-        'Name', 'Contact', 'Email', 'Address', 'Company', 'Category'
-    ])
-
-if 'leads' not in st.session_state:
-    st.session_state.leads = pd.DataFrame(columns=[
-        'Customer', 'Status', 'Value', 'Salesperson', 'Notes', 'FollowUp'
-    ])
-
-if 'interactions' not in st.session_state:
-    st.session_state.interactions = pd.DataFrame(columns=[
-        'Customer', 'Type', 'Date', 'Notes'
-    ])
-
-# Page Config
-st.set_page_config(
-    page_title="Sales CRM Dashboard",
-    page_icon="📊",
-    layout="wide"
-)
-
-# Custom CSS for styling
-st.markdown("""
-<style>
-    .header {font-size:24px !important; font-weight:bold; color:#1e3a8a;}
-    .subheader {font-size:18px !important; font-weight:600; color:#3b82f6; border-bottom:1px solid #eee; padding-bottom:5px;}
-    .metric {background-color:#f0f9ff; padding:15px; border-radius:10px; text-align:center; box-shadow:0 2px 5px rgba(0,0,0,0.05);}
-    .metric-value {font-size:24px; font-weight:bold; color:#1e3a8a;}
-    .metric-label {font-size:14px; color:#6b7280;}
-    .stDataFrame {border-radius:10px !important;}
-    .stButton>button {background-color:#3b82f6 !important; color:white !important; border-radius:8px;}
-    .stTextInput>div>div>input, .stSelectbox>div>div>select {border-radius:8px !important;}
-</style>
-""", unsafe_allow_html=True)
-
-# Main App
-def app():
+def app_page():
     st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3144/3144456.png", width=80)
     st.sidebar.title("Sales CRM")
+    
+    # Add logout button
+    if st.sidebar.button("Logout", type="primary", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.page = "login"
+        st.rerun()
+    
     menu = st.sidebar.selectbox("Navigation", [
         "Dashboard", 
         "Customer Management", 
@@ -624,7 +611,7 @@ def app():
     
     # Dashboard Tab
     if menu == "Dashboard":
-        st.markdown('<p class="header">Sales Dashboard</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Sales Dashboard</p>', unsafe_allow_html=True)
         
         # Metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -638,12 +625,12 @@ def app():
             st.markdown(f'<div class="metric"><div class="metric-value">{active_leads}</div><div class="metric-label">Active Leads</div></div>', 
                         unsafe_allow_html=True)
         with col3:
-            converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted'])
+            converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted']) if not st.session_state.leads.empty else 0
             conversion_rate = (converted / len(st.session_state.leads)) * 100 if len(st.session_state.leads) > 0 else 0
             st.markdown(f'<div class="metric"><div class="metric-value">{conversion_rate:.1f}%</div><div class="metric-label">Conversion Rate</div></div>', 
                         unsafe_allow_html=True)
         with col4:
-            total_value = st.session_state.leads['Value'].sum() if 'Value' in st.session_state.leads.columns else 0
+            total_value = st.session_state.leads['Value'].sum() if not st.session_state.leads.empty and 'Value' in st.session_state.leads.columns else 0
             st.markdown(f'<div class="metric"><div class="metric-value">${total_value:,.0f}</div><div class="metric-label">Pipeline Value</div></div>', 
                         unsafe_allow_html=True)
         
@@ -666,7 +653,7 @@ def app():
     
     # Customer Management Tab
     elif menu == "Customer Management":
-        st.markdown('<p class="header">Customer Management</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Customer Management</p>', unsafe_allow_html=True)
         
         with st.expander("Add New Customer", expanded=True):
             with st.form("customer_form"):
@@ -753,7 +740,7 @@ def app():
     
     # Lead Tracking Tab
     elif menu == "Lead Tracking":
-        st.markdown('<p class="header">Lead Tracking</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Lead Tracking</p>', unsafe_allow_html=True)
         
         with st.expander("Add New Lead", expanded=True):
             with st.form("lead_form"):
@@ -789,7 +776,7 @@ def app():
     
     # Interaction Logs Tab
     elif menu == "Interaction Logs":
-        st.markdown('<p class="header">Interaction Logs</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Interaction Logs</p>', unsafe_allow_html=True)
         
         with st.expander("Log New Interaction", expanded=True):
             with st.form("interaction_form"):
@@ -831,7 +818,7 @@ def app():
     
     # Sales Pipeline Tab
     elif menu == "Sales Pipeline":
-        st.markdown('<p class="header">Sales Pipeline</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Sales Pipeline</p>', unsafe_allow_html=True)
         
         if not st.session_state.leads.empty:
             # Filters
@@ -863,25 +850,25 @@ def app():
     
     # Reporting Tab
     elif menu == "Reporting":
-        st.markdown('<p class="header">Sales Reports</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Sales Reports</p>', unsafe_allow_html=True)
         
         if not st.session_state.leads.empty or not st.session_state.interactions.empty:
             cols = st.columns(3)
             with cols[0]:
                 st.markdown('<p class="subheader">Lead Conversion Rate</p>', unsafe_allow_html=True)
                 total_leads = len(st.session_state.leads)
-                converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted'])
+                converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted']) if not st.session_state.leads.empty else 0
                 conversion_rate = (converted / total_leads) * 100 if total_leads > 0 else 0
                 st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
             
             with cols[1]:
                 st.markdown('<p class="subheader">Active Leads</p>', unsafe_allow_html=True)
-                active_leads = len(st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])])
+                active_leads = len(st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])]) if not st.session_state.leads.empty else 0
                 st.metric("Active Leads", active_leads)
             
             with cols[2]:
                 st.markdown('<p class="subheader">Pipeline Value</p>', unsafe_allow_html=True)
-                total_value = st.session_state.leads['Value'].sum() if 'Value' in st.session_state.leads.columns else 0
+                total_value = st.session_state.leads['Value'].sum() if not st.session_state.leads.empty and 'Value' in st.session_state.leads.columns else 0
                 st.metric("Total Pipeline Value", f"${total_value:,.0f}")
             
             # Monthly Sales Trend
@@ -913,7 +900,7 @@ def app():
     
     # Export Data Tab
     elif menu == "Export Data":
-        st.markdown('<p class="header">Export Data</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-header">Export Data</p>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
         
