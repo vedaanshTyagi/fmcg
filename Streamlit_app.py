@@ -3,6 +3,8 @@ import pandas as pd
 import os
 from datetime import datetime
 import pyrebase  # This now uses pyrebase4
+from io import BytesIO
+import plotly.express as px
 
 # Firebase Configuration
 firebaseConfig = {
@@ -569,58 +571,389 @@ def password_reset():
 # =====================
 # APP PAGE
 # =====================
-def app_page():
-    st.title("FMCG CRM Dashboard")
-    st.success(f"Welcome, {st.session_state.user}!")
+# Initialize session state
+if 'customers' not in st.session_state:
+    st.session_state.customers = pd.DataFrame(columns=[
+        'Name', 'Contact', 'Email', 'Address', 'Company', 'Category'
+    ])
 
-    # Dashboard metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Customers", "245", "↑ 12%")
-    with col2:
-        st.metric("Active Leads", "89", "↑ 8%")
-    with col3:
-        st.metric("Conversion Rate", "23%", "↑ 3%")
-    with col4:
-        st.metric("Monthly Revenue", "$189K", "↑ 15%")
+if 'leads' not in st.session_state:
+    st.session_state.leads = pd.DataFrame(columns=[
+        'Customer', 'Status', 'Value', 'Salesperson', 'Notes', 'FollowUp'
+    ])
 
-    # Main content columns
-    col1, col2 = st.columns([3, 2])
+if 'interactions' not in st.session_state:
+    st.session_state.interactions = pd.DataFrame(columns=[
+        'Customer', 'Type', 'Date', 'Notes'
+    ])
 
-    with col1:
-        st.subheader("Recent Leads")
-        # Sample leads data
-        leads_data = pd.DataFrame({
-            'Company': ['ABC Distributors', 'XYZ Retail', 'Global Foods', 'Premium Goods'],
-            'Contact': ['John Smith', 'Sarah Johnson', 'Mike Thompson', 'Emily Davis'],
-            'Value': ['$12,500', '$8,200', '$24,000', '$5,400'],
-            'Status': ['Proposal Sent', 'Meeting Scheduled', 'Negotiation', 'New Lead'],
-            'Follow-up': ['Tomorrow', 'In 2 days', 'Next week', 'Today']
-        })
-        st.dataframe(leads_data, hide_index=True)
+# Page Config
+st.set_page_config(
+    page_title="Sales CRM Dashboard",
+    page_icon="📊",
+    layout="wide"
+)
 
-    with col2:
-        st.subheader("Upcoming Activities")
-        # Sample activities
-        activities = [
-            {"title": "Call with ABC Distributors", "time": "10:00 AM"},
-            {"title": "Product Demo - XYZ Retail", "time": "2:30 PM"},
-            {"title": "Contract Review Meeting", "time": "Tomorrow, 11:00 AM"},
-            {"title": "Quarterly Sales Review", "time": "Jun 15, 3:00 PM"}
-        ]
+# Custom CSS for styling
+st.markdown("""
+<style>
+    .header {font-size:24px !important; font-weight:bold; color:#1e3a8a;}
+    .subheader {font-size:18px !important; font-weight:600; color:#3b82f6; border-bottom:1px solid #eee; padding-bottom:5px;}
+    .metric {background-color:#f0f9ff; padding:15px; border-radius:10px; text-align:center; box-shadow:0 2px 5px rgba(0,0,0,0.05);}
+    .metric-value {font-size:24px; font-weight:bold; color:#1e3a8a;}
+    .metric-label {font-size:14px; color:#6b7280;}
+    .stDataFrame {border-radius:10px !important;}
+    .stButton>button {background-color:#3b82f6 !important; color:white !important; border-radius:8px;}
+    .stTextInput>div>div>input, .stSelectbox>div>div>select {border-radius:8px !important;}
+</style>
+""", unsafe_allow_html=True)
 
-        for activity in activities:
-            with st.container(border=True):
-                st.markdown(f"**{activity['title']}**")
-                st.caption(f"⏰ {activity['time']}")
-
-    # Add a logout button
-    if st.button("Logout", type="primary", use_container_width=True):
-        st.session_state.authenticated = False
-        st.session_state.user = None
-        st.session_state.page = "home"
-        st.session_state.auth_message = {'type': None, 'text': None}
-        st.rerun()
+# Main App
+def app():
+    st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3144/3144456.png", width=80)
+    st.sidebar.title("Sales CRM")
+    menu = st.sidebar.selectbox("Navigation", [
+        "Dashboard", 
+        "Customer Management", 
+        "Lead Tracking", 
+        "Interaction Logs",
+        "Sales Pipeline",
+        "Reporting",
+        "Export Data"
+    ])
+    
+    # Dashboard Tab
+    if menu == "Dashboard":
+        st.markdown('<p class="header">Sales Dashboard</p>', unsafe_allow_html=True)
+        
+        # Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.markdown('<div class="metric"><div class="metric-value">' + 
+                        str(len(st.session_state.customers)) + 
+                        '</div><div class="metric-label">Total Customers</div></div>', 
+                        unsafe_allow_html=True)
+        with col2:
+            active_leads = len(st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])])
+            st.markdown(f'<div class="metric"><div class="metric-value">{active_leads}</div><div class="metric-label">Active Leads</div></div>', 
+                        unsafe_allow_html=True)
+        with col3:
+            converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted'])
+            conversion_rate = (converted / len(st.session_state.leads)) * 100 if len(st.session_state.leads) > 0 else 0
+            st.markdown(f'<div class="metric"><div class="metric-value">{conversion_rate:.1f}%</div><div class="metric-label">Conversion Rate</div></div>', 
+                        unsafe_allow_html=True)
+        with col4:
+            total_value = st.session_state.leads['Value'].sum() if 'Value' in st.session_state.leads.columns else 0
+            st.markdown(f'<div class="metric"><div class="metric-value">${total_value:,.0f}</div><div class="metric-label">Pipeline Value</div></div>', 
+                        unsafe_allow_html=True)
+        
+        # Charts
+        st.markdown('<p class="subheader">Lead Status Distribution</p>', unsafe_allow_html=True)
+        if not st.session_state.leads.empty:
+            status_counts = st.session_state.leads['Status'].value_counts().reset_index()
+            fig = px.pie(status_counts, names='Status', values='count', hole=0.3)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No leads data available")
+        
+        # Recent Activities
+        st.markdown('<p class="subheader">Recent Activities</p>', unsafe_allow_html=True)
+        if not st.session_state.interactions.empty:
+            recent_interactions = st.session_state.interactions.sort_values('Date', ascending=False).head(5)
+            st.dataframe(recent_interactions, hide_index=True)
+        else:
+            st.info("No recent activities")
+    
+    # Customer Management Tab
+    elif menu == "Customer Management":
+        st.markdown('<p class="header">Customer Management</p>', unsafe_allow_html=True)
+        
+        with st.expander("Add New Customer", expanded=True):
+            with st.form("customer_form"):
+                cols = st.columns(2)
+                name = cols[0].text_input("Full Name*")
+                contact = cols[1].text_input("Phone Number*")
+                email = cols[0].text_input("Email*")
+                company = cols[1].text_input("Company")
+                address = cols[0].text_input("Address")
+                category = cols[1].selectbox("Category", ["Retailer", "Distributor", "Wholesaler", "Individual"])
+                
+                if st.form_submit_button("Save Customer"):
+                    if name and contact and email:
+                        new_customer = pd.DataFrame([{
+                            'Name': name,
+                            'Contact': contact,
+                            'Email': email,
+                            'Address': address,
+                            'Company': company,
+                            'Category': category
+                        }])
+                        st.session_state.customers = pd.concat([st.session_state.customers, new_customer], ignore_index=True)
+                        st.success("Customer added successfully!")
+                    else:
+                        st.error("Please fill required fields (Name, Contact, Email)")
+        
+        st.markdown('<p class="subheader">Customer Directory</p>', unsafe_allow_html=True)
+        if not st.session_state.customers.empty:
+            st.dataframe(st.session_state.customers, use_container_width=True, hide_index=True)
+            
+            # Edit/Delete functionality
+            st.markdown('<p class="subheader">Manage Customers</p>', unsafe_allow_html=True)
+            customer_names = st.session_state.customers['Name'].tolist()
+            selected_customer = st.selectbox("Select Customer to Manage", customer_names)
+            
+            if selected_customer:
+                customer_data = st.session_state.customers[st.session_state.customers['Name'] == selected_customer].iloc[0]
+                
+                cols = st.columns(3)
+                if cols[0].button("Edit Customer"):
+                    st.session_state.edit_customer = customer_data
+                
+                if cols[1].button("Delete Customer"):
+                    st.session_state.customers = st.session_state.customers[
+                        st.session_state.customers['Name'] != selected_customer
+                    ]
+                    st.success("Customer deleted successfully!")
+                    st.rerun()
+                
+                if 'edit_customer' in st.session_state:
+                    with st.expander("Edit Customer", expanded=True):
+                        with st.form("edit_customer_form"):
+                            cols = st.columns(2)
+                            name = cols[0].text_input("Full Name*", value=st.session_state.edit_customer['Name'])
+                            contact = cols[1].text_input("Phone Number*", value=st.session_state.edit_customer['Contact'])
+                            email = cols[0].text_input("Email*", value=st.session_state.edit_customer['Email'])
+                            company = cols[1].text_input("Company", value=st.session_state.edit_customer['Company'])
+                            address = cols[0].text_input("Address", value=st.session_state.edit_customer['Address'])
+                            category = cols[1].selectbox("Category", ["Retailer", "Distributor", "Wholesaler", "Individual"], 
+                                                        index=["Retailer", "Distributor", "Wholesaler", "Individual"].index(
+                                                            st.session_state.edit_customer['Category']))
+                            
+                            if st.form_submit_button("Update Customer"):
+                                if name and contact and email:
+                                    # Update customer
+                                    idx = st.session_state.customers[
+                                        st.session_state.customers['Name'] == st.session_state.edit_customer['Name']
+                                    ].index[0]
+                                    
+                                    st.session_state.customers.at[idx, 'Name'] = name
+                                    st.session_state.customers.at[idx, 'Contact'] = contact
+                                    st.session_state.customers.at[idx, 'Email'] = email
+                                    st.session_state.customers.at[idx, 'Company'] = company
+                                    st.session_state.customers.at[idx, 'Address'] = address
+                                    st.session_state.customers.at[idx, 'Category'] = category
+                                    
+                                    del st.session_state.edit_customer
+                                    st.success("Customer updated successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error("Please fill required fields")
+        else:
+            st.info("No customers found. Add your first customer using the form above.")
+    
+    # Lead Tracking Tab
+    elif menu == "Lead Tracking":
+        st.markdown('<p class="header">Lead Tracking</p>', unsafe_allow_html=True)
+        
+        with st.expander("Add New Lead", expanded=True):
+            with st.form("lead_form"):
+                cols = st.columns(2)
+                customer = cols[0].selectbox("Customer*", st.session_state.customers['Name'].tolist() if not st.session_state.customers.empty else [])
+                status = cols[1].selectbox("Status*", ["New", "Contacted", "Quoted", "Converted", "Lost"])
+                value = cols[0].number_input("Potential Value ($)", min_value=0, step=100)
+                salesperson = cols[1].text_input("Salesperson")
+                notes = st.text_area("Notes")
+                follow_up = st.date_input("Follow-up Date", min_value=datetime.date.today())
+                
+                if st.form_submit_button("Save Lead"):
+                    if customer:
+                        new_lead = pd.DataFrame([{
+                            'Customer': customer,
+                            'Status': status,
+                            'Value': value,
+                            'Salesperson': salesperson,
+                            'Notes': notes,
+                            'FollowUp': follow_up
+                        }])
+                        st.session_state.leads = pd.concat([st.session_state.leads, new_lead], ignore_index=True)
+                        st.success("Lead added successfully!")
+                    else:
+                        st.error("Please select a customer")
+        
+        st.markdown('<p class="subheader">Active Leads</p>', unsafe_allow_html=True)
+        if not st.session_state.leads.empty:
+            active_leads = st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])]
+            st.dataframe(active_leads, use_container_width=True, hide_index=True)
+        else:
+            st.info("No active leads found")
+    
+    # Interaction Logs Tab
+    elif menu == "Interaction Logs":
+        st.markdown('<p class="header">Interaction Logs</p>', unsafe_allow_html=True)
+        
+        with st.expander("Log New Interaction", expanded=True):
+            with st.form("interaction_form"):
+                cols = st.columns(2)
+                customer = cols[0].selectbox("Customer*", st.session_state.customers['Name'].tolist() if not st.session_state.customers.empty else [])
+                interaction_type = cols[1].selectbox("Type*", ["Call", "Meeting", "Email"])
+                date = st.date_input("Date*", datetime.date.today())
+                notes = st.text_area("Notes*")
+                
+                if st.form_submit_button("Log Interaction"):
+                    if customer and notes:
+                        new_interaction = pd.DataFrame([{
+                            'Customer': customer,
+                            'Type': interaction_type,
+                            'Date': date,
+                            'Notes': notes
+                        }])
+                        st.session_state.interactions = pd.concat([st.session_state.interactions, new_interaction], ignore_index=True)
+                        st.success("Interaction logged successfully!")
+                    else:
+                        st.error("Please fill required fields")
+        
+        st.markdown('<p class="subheader">Interaction History</p>', unsafe_allow_html=True)
+        if not st.session_state.interactions.empty:
+            customer_filter = st.selectbox("Filter by Customer", 
+                                         ["All"] + st.session_state.customers['Name'].tolist())
+            
+            if customer_filter != "All":
+                filtered_interactions = st.session_state.interactions[
+                    st.session_state.interactions['Customer'] == customer_filter
+                ]
+            else:
+                filtered_interactions = st.session_state.interactions
+                
+            st.dataframe(filtered_interactions.sort_values('Date', ascending=False), 
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("No interactions logged yet")
+    
+    # Sales Pipeline Tab
+    elif menu == "Sales Pipeline":
+        st.markdown('<p class="header">Sales Pipeline</p>', unsafe_allow_html=True)
+        
+        if not st.session_state.leads.empty:
+            # Filters
+            cols = st.columns(3)
+            status_filter = cols[0].multiselect("Filter by Status", 
+                                               st.session_state.leads['Status'].unique(),
+                                               default=["New", "Contacted", "Quoted"])
+            salesperson_filter = cols[1].multiselect("Filter by Salesperson", 
+                                                    st.session_state.leads['Salesperson'].unique())
+            
+            filtered_leads = st.session_state.leads
+            if status_filter:
+                filtered_leads = filtered_leads[filtered_leads['Status'].isin(status_filter)]
+            if salesperson_filter:
+                filtered_leads = filtered_leads[filtered_leads['Salesperson'].isin(salesperson_filter)]
+            
+            # Pipeline Visualization
+            st.markdown('<p class="subheader">Pipeline Value by Status</p>', unsafe_allow_html=True)
+            pipeline_value = filtered_leads.groupby('Status')['Value'].sum().reset_index()
+            fig = px.bar(pipeline_value, x='Status', y='Value', text='Value', 
+                         color='Status', template='plotly_white')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Leads Table
+            st.markdown('<p class="subheader">Leads</p>', unsafe_allow_html=True)
+            st.dataframe(filtered_leads, use_container_width=True, hide_index=True)
+        else:
+            st.info("No leads data available")
+    
+    # Reporting Tab
+    elif menu == "Reporting":
+        st.markdown('<p class="header">Sales Reports</p>', unsafe_allow_html=True)
+        
+        if not st.session_state.leads.empty or not st.session_state.interactions.empty:
+            cols = st.columns(3)
+            with cols[0]:
+                st.markdown('<p class="subheader">Lead Conversion Rate</p>', unsafe_allow_html=True)
+                total_leads = len(st.session_state.leads)
+                converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted'])
+                conversion_rate = (converted / total_leads) * 100 if total_leads > 0 else 0
+                st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
+            
+            with cols[1]:
+                st.markdown('<p class="subheader">Active Leads</p>', unsafe_allow_html=True)
+                active_leads = len(st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])])
+                st.metric("Active Leads", active_leads)
+            
+            with cols[2]:
+                st.markdown('<p class="subheader">Pipeline Value</p>', unsafe_allow_html=True)
+                total_value = st.session_state.leads['Value'].sum() if 'Value' in st.session_state.leads.columns else 0
+                st.metric("Total Pipeline Value", f"${total_value:,.0f}")
+            
+            # Monthly Sales Trend
+            st.markdown('<p class="subheader">Monthly Sales Trend</p>', unsafe_allow_html=True)
+            if not st.session_state.leads.empty and 'FollowUp' in st.session_state.leads.columns:
+                leads = st.session_state.leads.copy()
+                leads['Month'] = pd.to_datetime(leads['FollowUp']).dt.to_period('M')
+                monthly_sales = leads[leads['Status'] == 'Converted'].groupby('Month')['Value'].sum().reset_index()
+                monthly_sales['Month'] = monthly_sales['Month'].dt.strftime('%Y-%m')
+                
+                if not monthly_sales.empty:
+                    fig = px.line(monthly_sales, x='Month', y='Value', markers=True, 
+                                 title="Monthly Sales Value", template='plotly_white')
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No converted leads for monthly trend")
+            
+            # Sales by Salesperson
+            if 'Salesperson' in st.session_state.leads.columns and not st.session_state.leads.empty:
+                st.markdown('<p class="subheader">Performance by Salesperson</p>', unsafe_allow_html=True)
+                sales_by_person = st.session_state.leads[st.session_state.leads['Status'] == 'Converted'].groupby('Salesperson')['Value'].sum().reset_index()
+                
+                if not sales_by_person.empty:
+                    fig = px.bar(sales_by_person, x='Salesperson', y='Value', text='Value',
+                                title="Sales Value by Salesperson", template='plotly_white')
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No data available for reporting")
+    
+    # Export Data Tab
+    elif menu == "Export Data":
+        st.markdown('<p class="header">Export Data</p>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<p class="subheader">Export Customers</p>', unsafe_allow_html=True)
+            if not st.session_state.customers.empty:
+                csv = st.session_state.customers.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "Download as CSV",
+                    csv,
+                    "customers.csv",
+                    "text/csv"
+                )
+            else:
+                st.info("No customers to export")
+        
+        with col2:
+            st.markdown('<p class="subheader">Export Leads</p>', unsafe_allow_html=True)
+            if not st.session_state.leads.empty:
+                csv = st.session_state.leads.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "Download as CSV",
+                    csv,
+                    "leads.csv",
+                    "text/csv"
+                )
+            else:
+                st.info("No leads to export")
+        
+        st.markdown('<p class="subheader">Export Interactions</p>', unsafe_allow_html=True)
+        if not st.session_state.interactions.empty:
+            csv = st.session_state.interactions.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "Download as CSV",
+                csv,
+                "interactions.csv",
+                "text/csv"
+            )
+        else:
+            st.info("No interactions to export")
 
 
 # =====================
