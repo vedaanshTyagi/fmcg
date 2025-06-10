@@ -10,3 +10,4 @@ setuptools>=69.0.0  # Required for pkg_resources
 plotly.express
 BytesIO
 io
+datetime
