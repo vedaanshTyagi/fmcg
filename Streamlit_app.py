@@ -34,7 +34,7 @@ def load_sheet_data(sheet_name):
         if not client:
             return pd.DataFrame()
             
-        spreadsheet = client.open(st.secrets["gcp_service_account"]["spreadsheet_name"])
+        spreadsheet = client.open(st.secrets["gcp_service_account"]["V2 Database"])
         worksheet = spreadsheet.worksheet(sheet_name)
         data = worksheet.get_all_records()
         return pd.DataFrame(data)
