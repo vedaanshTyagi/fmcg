@@ -5,24 +5,27 @@ import pyrebase
 from io import BytesIO
 import plotly.express as px
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
+
 # Initialize Google Sheets client
 def init_gsheets():
     try:
-        # Define required scopes
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", 
-                  "https://www.googleapis.com/auth/drive"]
-
-        # Load credentials from secrets
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=scopes
-        )
-
-        # Authorize client
+        # Check if secrets exist
+        if "gcp_service_account" not in st.secrets:
+            st.error("Google Sheets service account credentials not found in secrets")
+            return None
+        if "gsheets" not in st.secrets or "spreadsheet_name" not in st.secrets["gsheets"]:
+            st.error("Google Sheets configuration not found in secrets")
+            return None
+            
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        
+        # Load credentials from Streamlit secrets
+        creds_dict = st.secrets["gcp_service_account"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         return client
-
     except Exception as e:
         st.error(f"Google Sheets initialization failed: {str(e)}")
         return None
@@ -34,7 +37,7 @@ def load_sheet_data(sheet_name):
         if not client:
             return pd.DataFrame()
             
-        spreadsheet = client.open(st.secrets["gcp_service_account"]["V2 Database"])
+        spreadsheet = client.open(st.secrets["gsheets"]["spreadsheet_name"])
         worksheet = spreadsheet.worksheet(sheet_name)
         data = worksheet.get_all_records()
         return pd.DataFrame(data)
@@ -50,7 +53,7 @@ def save_sheet_data(sheet_name, df):
             st.error("Google Sheets client not initialized")
             return False
             
-        spreadsheet = client.open(st.secrets["gcp_service_account"]["spreadsheet_name"])
+        spreadsheet = client.open(st.secrets["gsheets"]["spreadsheet_name"])
         worksheet = spreadsheet.worksheet(sheet_name)
         
         # Clear existing data and update with new
@@ -272,7 +275,7 @@ if 'page' not in st.session_state:
     st.session_state.auth_message = {'type': None, 'text': None}
     st.session_state.show_password_reset = False
     st.session_state.show_signup = False
-    st.session_state.edit_customer = None
+    st.session_state.edit_customer_idx = None
     
     # Initialize empty DataFrames with proper columns
     st.session_state.customers = pd.DataFrame(columns=[
@@ -746,7 +749,8 @@ def app_page():
                 address = cols[0].text_input("Address")
                 category = cols[1].selectbox("Category", ["Retailer", "Distributor", "Wholesaler", "Individual"])
 
-                if st.form_submit_button("Save Customer"):
+                submit = st.form_submit_button("Save Customer", use_container_width=True)
+                if submit:
                     if name and contact and email:
                         new_customer = pd.DataFrame([{
                             'Name': name,
@@ -779,50 +783,57 @@ def app_page():
             selected_customer = st.selectbox("Select Customer to Manage", customer_names)
 
             if selected_customer:
-                customer_data = st.session_state.customers[st.session_state.customers['Name'] == selected_customer].iloc[0]
+                # Get the index of the selected customer
+                matching_indices = st.session_state.customers.index[
+                    st.session_state.customers['Name'] == selected_customer].tolist()
+                if matching_indices:
+                    customer_idx = matching_indices[0]
 
-                cols = st.columns(3)
-                if cols[0].button("Edit Customer"):
-                    st.session_state.edit_customer = customer_data
+                    cols = st.columns(3)
+                    if cols[0].button("Edit Customer", use_container_width=True):
+                        st.session_state.edit_customer_idx = customer_idx
 
-                if cols[1].button("Delete Customer"):
-                    st.session_state.customers = st.session_state.customers[
-                        st.session_state.customers['Name'] != selected_customer
-                    ]
-                    # SAVE TO GOOGLE SHEETS
-                    if save_sheet_data("Customers", st.session_state.customers):
-                        st.success("Customer deleted and updated in cloud!")
-                    else:
-                        st.error("Deletion saved locally but cloud update failed")
-                    st.rerun()
+                    if cols[1].button("Delete Customer", use_container_width=True):
+                        # Check if we're deleting the customer being edited
+                        if 'edit_customer_idx' in st.session_state and st.session_state.edit_customer_idx == customer_idx:
+                            del st.session_state.edit_customer_idx
+                            
+                        st.session_state.customers = st.session_state.customers.drop(customer_idx)
+                        
+                        # SAVE TO GOOGLE SHEETS
+                        if save_sheet_data("Customers", st.session_state.customers):
+                            st.success("Customer deleted and updated in cloud!")
+                        else:
+                            st.error("Deletion saved locally but cloud update failed")
+                        st.rerun()
 
-                if 'edit_customer' in st.session_state:
+            # Show edit form if a customer is being edited
+            if 'edit_customer_idx' in st.session_state:
+                if st.session_state.edit_customer_idx in st.session_state.customers.index:
+                    customer_data = st.session_state.customers.loc[st.session_state.edit_customer_idx]
                     with st.expander("Edit Customer", expanded=True):
                         with st.form("edit_customer_form"):
                             cols = st.columns(2)
-                            name = cols[0].text_input("Full Name*", value=st.session_state.edit_customer['Name'])
-                            contact = cols[1].text_input("Phone Number*", value=st.session_state.edit_customer['Contact'])
-                            email = cols[0].text_input("Email*", value=st.session_state.edit_customer['Email'])
-                            company = cols[1].text_input("Company", value=st.session_state.edit_customer['Company'])
-                            address = cols[0].text_input("Address", value=st.session_state.edit_customer['Address'])
+                            name = cols[0].text_input("Full Name*", value=customer_data['Name'])
+                            contact = cols[1].text_input("Phone Number*", value=customer_data['Contact'])
+                            email = cols[0].text_input("Email*", value=customer_data['Email'])
+                            company = cols[1].text_input("Company", value=customer_data['Company'])
+                            address = cols[0].text_input("Address", value=customer_data['Address'])
                             category = cols[1].selectbox("Category",
                                                          ["Retailer", "Distributor", "Wholesaler", "Individual"],
                                                          index=["Retailer", "Distributor", "Wholesaler", "Individual"].index(
-                                                             st.session_state.edit_customer['Category']))
+                                                             customer_data['Category']))
 
-                            if st.form_submit_button("Update Customer"):
+                            submit = st.form_submit_button("Update Customer", use_container_width=True)
+                            if submit:
                                 if name and contact and email:
                                     # Update customer
-                                    idx = st.session_state.customers[
-                                        st.session_state.customers['Name'] == st.session_state.edit_customer['Name']
-                                        ].index[0]
-
-                                    st.session_state.customers.at[idx, 'Name'] = name
-                                    st.session_state.customers.at[idx, 'Contact'] = contact
-                                    st.session_state.customers.at[idx, 'Email'] = email
-                                    st.session_state.customers.at[idx, 'Company'] = company
-                                    st.session_state.customers.at[idx, 'Address'] = address
-                                    st.session_state.customers.at[idx, 'Category'] = category
+                                    st.session_state.customers.at[st.session_state.edit_customer_idx, 'Name'] = name
+                                    st.session_state.customers.at[st.session_state.edit_customer_idx, 'Contact'] = contact
+                                    st.session_state.customers.at[st.session_state.edit_customer_idx, 'Email'] = email
+                                    st.session_state.customers.at[st.session_state.edit_customer_idx, 'Company'] = company
+                                    st.session_state.customers.at[st.session_state.edit_customer_idx, 'Address'] = address
+                                    st.session_state.customers.at[st.session_state.edit_customer_idx, 'Category'] = category
 
                                     # SAVE TO GOOGLE SHEETS
                                     if save_sheet_data("Customers", st.session_state.customers):
@@ -830,10 +841,13 @@ def app_page():
                                     else:
                                         st.error("Update saved locally but cloud update failed")
                                     
-                                    del st.session_state.edit_customer
+                                    del st.session_state.edit_customer_idx
                                     st.rerun()
                                 else:
                                     st.error("Please fill required fields")
+                else:
+                    st.error("The customer being edited no longer exists")
+                    del st.session_state.edit_customer_idx
         else:
             st.info("No customers found. Add your first customer using the form above.")
 
@@ -852,7 +866,8 @@ def app_page():
                 notes = st.text_area("Notes")
                 follow_up = st.date_input("Follow-up Date", min_value=datetime.date.today())
 
-                if st.form_submit_button("Save Lead"):
+                submit = st.form_submit_button("Save Lead", use_container_width=True)
+                if submit:
                     if customer:
                         new_lead = pd.DataFrame([{
                             'Customer': customer,
@@ -892,7 +907,8 @@ def app_page():
                 date = st.date_input("Date*", datetime.date.today())
                 notes = st.text_area("Notes*")
 
-                if st.form_submit_button("Log Interaction"):
+                submit = st.form_submit_button("Log Interaction", use_container_width=True)
+                if submit:
                     if customer and notes:
                         new_interaction = pd.DataFrame([{
                             'Customer': customer,
