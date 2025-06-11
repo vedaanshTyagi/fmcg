@@ -37,7 +37,7 @@ def load_sheet_data(sheet_name):
         if not client:
             return pd.DataFrame()
             
-        spreadsheet = client.open(st.secrets["gsheets"]["spreadsheet_name"])
+        spreadsheet = client.open(st.secrets["gcp_service_account"]["spreadsheet_name"])
         worksheet = spreadsheet.worksheet(sheet_name)
         data = worksheet.get_all_records()
         return pd.DataFrame(data)
@@ -53,7 +53,7 @@ def save_sheet_data(sheet_name, df):
             st.error("Google Sheets client not initialized")
             return False
             
-        spreadsheet = client.open(st.secrets["gsheets"]["spreadsheet_name"])
+        spreadsheet = client.open(st.secrets["gcp_service_account"]["spreadsheet_name"])
         worksheet = spreadsheet.worksheet(sheet_name)
         
         # Clear existing data and update with new
