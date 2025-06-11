@@ -26,6 +26,9 @@ def init_gsheets():
 def load_sheet_data(sheet_name):
     try:
         client = init_gsheets()
+        if not client:
+            return pd.DataFrame()
+            
         spreadsheet = client.open(st.secrets["gsheets"]["spreadsheet_name"])
         worksheet = spreadsheet.worksheet(sheet_name)
         data = worksheet.get_all_records()
@@ -38,14 +41,25 @@ def load_sheet_data(sheet_name):
 def save_sheet_data(sheet_name, df):
     try:
         client = init_gsheets()
+        if not client:
+            st.error("Google Sheets client not initialized")
+            return False
+            
         spreadsheet = client.open(st.secrets["gsheets"]["spreadsheet_name"])
         worksheet = spreadsheet.worksheet(sheet_name)
         
         # Clear existing data and update with new
         worksheet.clear()
-        worksheet.append_row(df.columns.tolist())  # Add headers
-        for _, row in df.iterrows():
-            worksheet.append_row(row.tolist())
+        
+        # Handle empty DataFrames
+        if df.empty:
+            # Initialize with column headers
+            worksheet.append_row(df.columns.tolist())
+            return True
+            
+        # Convert DataFrame to list of lists
+        data = [df.columns.tolist()] + df.values.tolist()
+        worksheet.update('A1', data)
         return True
     except Exception as e:
         st.error(f"Error saving {sheet_name} data: {str(e)}")
@@ -255,7 +269,7 @@ if 'page' not in st.session_state:
     st.session_state.show_signup = False
     st.session_state.edit_customer = None
     
-    # Initialize empty DataFrames (will be loaded from Google Sheets after login)
+    # Initialize empty DataFrames with proper columns
     st.session_state.customers = pd.DataFrame(columns=[
         'Name', 'Contact', 'Email', 'Address', 'Company', 'Category'
     ])
@@ -297,9 +311,21 @@ def login_user(email, password):
         
         # LOAD DATA FROM GOOGLE SHEETS AFTER LOGIN
         try:
-            st.session_state.customers = load_sheet_data("Customers")
-            st.session_state.leads = load_sheet_data("Leads")
-            st.session_state.interactions = load_sheet_data("Interactions")
+            # Load customers
+            customers_df = load_sheet_data("Customers")
+            if not customers_df.empty:
+                st.session_state.customers = customers_df
+            
+            # Load leads
+            leads_df = load_sheet_data("Leads")
+            if not leads_df.empty:
+                st.session_state.leads = leads_df
+                
+            # Load interactions
+            interactions_df = load_sheet_data("Interactions")
+            if not interactions_df.empty:
+                st.session_state.interactions = interactions_df
+                
             st.session_state.auth_message = {'type': 'success', 'text': 'Login successful! Data loaded.'}
         except Exception as e:
             st.session_state.auth_message = {'type': 'error', 'text': f'Data load error: {str(e)}'}
@@ -657,26 +683,36 @@ def app_page():
                         '</div><div class="metric-label">Total Customers</div></div>',
                         unsafe_allow_html=True)
         with col2:
-            active_leads = len(
-                st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])])
+            # Handle case where Status column might be missing
+            if not st.session_state.leads.empty and 'Status' in st.session_state.leads.columns:
+                active_leads = len(
+                    st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])])
+            else:
+                active_leads = 0
             st.markdown(
                 f'<div class="metric"><div class="metric-value">{active_leads}</div><div class="metric-label">Active Leads</div></div>',
                 unsafe_allow_html=True)
         with col3:
-            converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted']) if not st.session_state.leads.empty else 0
-            conversion_rate = (converted / len(st.session_state.leads)) * 100 if len(st.session_state.leads) > 0 else 0
+            if not st.session_state.leads.empty and 'Status' in st.session_state.leads.columns:
+                converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted'])
+                conversion_rate = (converted / len(st.session_state.leads)) * 100 if len(st.session_state.leads) > 0 else 0
+            else:
+                conversion_rate = 0
             st.markdown(
                 f'<div class="metric"><div class="metric-value">{conversion_rate:.1f}%</div><div class="metric-label">Conversion Rate</div></div>',
                 unsafe_allow_html=True)
         with col4:
-            total_value = st.session_state.leads['Value'].sum() if not st.session_state.leads.empty and 'Value' in st.session_state.leads.columns else 0
+            if not st.session_state.leads.empty and 'Value' in st.session_state.leads.columns:
+                total_value = st.session_state.leads['Value'].sum()
+            else:
+                total_value = 0
             st.markdown(
                 f'<div class="metric"><div class="metric-value">${total_value:,.0f}</div><div class="metric-label">Pipeline Value</div></div>',
                 unsafe_allow_html=True)
 
         # Charts
         st.markdown('<p class="subheader">Lead Status Distribution</p>', unsafe_allow_html=True)
-        if not st.session_state.leads.empty:
+        if not st.session_state.leads.empty and 'Status' in st.session_state.leads.columns:
             status_counts = st.session_state.leads['Status'].value_counts().reset_index()
             fig = px.pie(status_counts, names='Status', values='count', hole=0.3)
             st.plotly_chart(fig, use_container_width=True)
@@ -685,7 +721,7 @@ def app_page():
 
         # Recent Activities
         st.markdown('<p class="subheader">Recent Activities</p>', unsafe_allow_html=True)
-        if not st.session_state.interactions.empty:
+        if not st.session_state.interactions.empty and 'Date' in st.session_state.interactions.columns:
             recent_interactions = st.session_state.interactions.sort_values('Date', ascending=False).head(5)
             st.dataframe(recent_interactions, hide_index=True)
         else:
@@ -832,7 +868,7 @@ def app_page():
                         st.error("Please select a customer")
 
         st.markdown('<p class="subheader">Active Leads</p>', unsafe_allow_html=True)
-        if not st.session_state.leads.empty:
+        if not st.session_state.leads.empty and 'Status' in st.session_state.leads.columns:
             active_leads = st.session_state.leads[st.session_state.leads['Status'].isin(['New', 'Contacted', 'Quoted'])]
             st.dataframe(active_leads, use_container_width=True, hide_index=True)
         else:
@@ -928,20 +964,28 @@ def app_page():
             with col1:
                 st.markdown('<p class="subheader">Lead Conversion Rate</p>', unsafe_allow_html=True)
                 total_leads = len(st.session_state.leads)
-                converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted']) if not st.session_state.leads.empty else 0
+                if not st.session_state.leads.empty and 'Status' in st.session_state.leads.columns:
+                    converted = len(st.session_state.leads[st.session_state.leads['Status'] == 'Converted'])
+                else:
+                    converted = 0
                 conversion_rate = (converted / total_leads) * 100 if total_leads > 0 else 0
                 st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
 
             with col2:
                 st.markdown('<p class="subheader">Active Leads</p>', unsafe_allow_html=True)
-                active_leads = len(st.session_state.leads[st.session_state.leads['Status'].isin(
-                    ['New', 'Contacted', 'Quoted'])]) if not st.session_state.leads.empty else 0
+                if not st.session_state.leads.empty and 'Status' in st.session_state.leads.columns:
+                    active_leads = len(st.session_state.leads[st.session_state.leads['Status'].isin(
+                        ['New', 'Contacted', 'Quoted'])])
+                else:
+                    active_leads = 0
                 st.metric("Active Leads", active_leads)
 
             with col3:
                 st.markdown('<p class="subheader">Pipeline Value</p>', unsafe_allow_html=True)
-                total_value = st.session_state.leads[
-                    'Value'].sum() if not st.session_state.leads.empty and 'Value' in st.session_state.leads.columns else 0
+                if not st.session_state.leads.empty and 'Value' in st.session_state.leads.columns:
+                    total_value = st.session_state.leads['Value'].sum()
+                else:
+                    total_value = 0
                 st.metric("Total Pipeline Value", f"${total_value:,.0f}")
 
             # Monthly Sales Trend
