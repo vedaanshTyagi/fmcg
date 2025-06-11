@@ -5,19 +5,24 @@ import pyrebase
 from io import BytesIO
 import plotly.express as px
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
+from google.oauth2.service_account import Credentials
 # Initialize Google Sheets client
 def init_gsheets():
     try:
-        scope = ['https://spreadsheets.google.com/feeds',
-                 'https://www.googleapis.com/auth/drive']
-        
-        # Load credentials from Streamlit secrets
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        # Define required scopes
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", 
+                  "https://www.googleapis.com/auth/drive"]
+
+        # Load credentials from secrets
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=scopes
+        )
+
+        # Authorize client
         client = gspread.authorize(creds)
         return client
+
     except Exception as e:
         st.error(f"Google Sheets initialization failed: {str(e)}")
         return None
